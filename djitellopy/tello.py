@@ -7,6 +7,8 @@ import socket
 import time
 from threading import Thread
 from typing import Optional, Union, Type, Dict
+from djitellopy import communication
+import json
 
 import cv2 # type: ignore
 from .enforce_types import enforce_types
@@ -30,7 +32,7 @@ class Tello:
     FRAME_GRAB_TIMEOUT = 3
     TIME_BTW_COMMANDS = 0.1  # in seconds
     TIME_BTW_RC_CONTROL_COMMANDS = 0.001  # in seconds
-    RETRY_COUNT = 3  # number of retries after a failed command
+    RETRY_COUNT = 1  # number of retries after a failed command
     TELLO_IP = '192.168.10.1'  # Tello IP address
 
     # Video stream, server socket
@@ -443,7 +445,6 @@ class Tello:
         client_socket.sendto(command.encode('utf-8'), self.address)
 
         responses = self.get_own_udp_object()['responses']
-
         while not responses:
             if time.time() - timestamp > timeout:
                 message = "Aborting command '{}'. Did not receive a response after {} seconds".format(command, timeout)
@@ -462,6 +463,7 @@ class Tello:
         response = response.rstrip("\r\n")
 
         self.LOGGER.info("Response {}: '{}'".format(command, response))
+
         return response
 
     def send_command_without_return(self, command: str):
@@ -478,15 +480,25 @@ class Tello:
         Internal method, you normally wouldn't call this yourself.
         """
         response = "max retries exceeded"
+
+
+        
+        a = {"command":"connect", "ip":self.TELLO_IP, "status":"failed"}
+        a["command"] = command
+        a["ip"] = self.TELLO_IP
+
         for i in range(0, self.retry_count):
             response = self.send_command_with_return(command, timeout=timeout)
 
             if 'ok' in response.lower():
+                a["status"] = "ok"
+                communication.send_response("Response|" + json.dumps(a))
                 return True
 
             self.LOGGER.debug("Command attempt #{} failed for command: '{}'".format(i, command))
 
-        self.raise_result_error(command, response)
+        # self.raise_result_error(command, response)
+        communication.send_response("Response|" + json.dumps(a))
         return False # never reached
 
     def send_read_command(self, command: str) -> str:
@@ -542,11 +554,16 @@ class Tello:
                 if self.get_current_state():
                     t = i / REPS  # in seconds
                     Tello.LOGGER.debug("'.connect()' received first state packet after {} seconds".format(t))
+                    communication.connected_swarm_IP.append(self.TELLO_IP)
                     break
                 time.sleep(1 / REPS)
 
             if not self.get_current_state():
-                raise Exception('Did not receive a state packet from the Tello')
+                Tello.LOGGER.debug("Did not receive a state packet from the Tello")
+
+                # raise Exception('Did not receive a state packet from the Tello')
+        
+        
 
     def send_keepalive(self):
         """Send a keepalive packet to prevent the drone from landing after 15s
