@@ -27,7 +27,7 @@ while True:
     # In reality you want to display frames in a seperate thread. Otherwise
     #  they will freeze while the drone moves.
     # 在实际开发里请在另一个线程中显示摄像头画面，否则画面会在无人机移动时静止
-    img = frame_read.frame
+    img = frame_read.get_frame()
     cv2.imshow("drone", img)
 
     key = cv2.waitKey(1) & 0xff

@@ -5,13 +5,13 @@
 import logging
 import socket
 import time
-from threading import Thread
+from threading import Thread, Lock
 from typing import Optional, Union, Type, Dict
 from djitellopy import communication
 import json
-
 import cv2 # type: ignore
 from .enforce_types import enforce_types
+from subprocess import Popen, CREATE_NEW_CONSOLE
 
 
 threads_initialized = False
@@ -89,6 +89,7 @@ class Tello:
     cap: Optional[cv2.VideoCapture] = None
     background_frame_read: Optional['BackgroundFrameRead'] = None
 
+    connected = False
     stream_on = False
     is_flying = False
 
@@ -99,6 +100,7 @@ class Tello:
         global threads_initialized, client_socket, drones
 
         self.address = (host, Tello.CONTROL_UDP_PORT)
+        self.connected = False
         self.stream_on = False
         self.retry_count = retry_count
         self.last_received_command_timestamp = time.time()
@@ -422,7 +424,7 @@ class Tello:
         """
         if self.background_frame_read is None:
             address = self.get_udp_video_address(port)
-            self.background_frame_read = BackgroundFrameRead(self, address)  # also sets self.cap
+            self.background_frame_read = BackgroundFrameRead(self, address, port)  # also sets self.cap
             self.background_frame_read.start()
         return self.background_frame_read
 
@@ -483,23 +485,23 @@ class Tello:
 
 
         
-        a = {"command":"connect", "ip":self.TELLO_IP, "status":"failed"}
+        a = {"command":"", "ip":self.address[0], "status":"failed"}
         a["command"] = command
-        a["ip"] = self.TELLO_IP
+        a["ip"] = self.address[0]
 
         for i in range(0, self.retry_count):
             response = self.send_command_with_return(command, timeout=timeout)
 
             if 'ok' in response.lower():
                 a["status"] = "ok"
-                communication.send_response("Response|" + json.dumps(a))
+                communication.message_queue.append("Response|" + json.dumps(a))
                 return True
 
             self.LOGGER.debug("Command attempt #{} failed for command: '{}'".format(i, command))
 
         # self.raise_result_error(command, response)
-        communication.send_response("Response|" + json.dumps(a))
-        return False # never reached
+        communication.message_queue.append("Response|" + json.dumps(a))
+        return False 
 
     def send_read_command(self, command: str) -> str:
         """Send given command to Tello and wait for its response.
@@ -546,23 +548,30 @@ class Tello:
     def connect(self, wait_for_state=True):
         """Enter SDK mode. Call this before any of the control functions.
         """
-        self.send_control_command("command")
+        success = self.send_control_command("command")
+        while not success:
+            time.sleep(3)
+            self.send_control_command("command")
 
         if wait_for_state:
             REPS = 20
             for i in range(REPS):
                 if self.get_current_state():
+                    self.connected = True
                     t = i / REPS  # in seconds
                     Tello.LOGGER.debug("'.connect()' received first state packet after {} seconds".format(t))
-                    communication.connected_swarm_IP.append(self.TELLO_IP)
+                    communication.connected_tellos.append(self)
+                    self.streamon()
+                    self.VS_UDP_PORT = 2000 + int(self.address[0][-2:])
+                    self.set_video_port(self.VS_UDP_PORT)
+                    process = Popen(f"ffplay udp://0.0.0.0:{self.VS_UDP_PORT}", creationflags=CREATE_NEW_CONSOLE)
                     break
                 time.sleep(1 / REPS)
 
             if not self.get_current_state():
-                Tello.LOGGER.debug("Did not receive a state packet from the Tello")
+                Tello.LOGGER.debug("Connected but did not receive a state packet from the Tello")
+                raise Exception('Connected but did not receive a state packet from the Tello')
 
-                # raise Exception('Did not receive a state packet from the Tello')
-        
         
 
     def send_keepalive(self):
@@ -1033,6 +1042,8 @@ class Tello:
             self.background_frame_read.stop()
         if self.cap is not None:
             self.cap.release()
+        self.connected = False
+        communication.connected_tellos.remove(self)
 
         host = self.address[0]
         if host in drones:
@@ -1048,10 +1059,12 @@ class BackgroundFrameRead:
     backgroundFrameRead.frame to get the current frame.
     """
 
-    def __init__(self, tello, address):
+    def __init__(self, tello, address, port=11111):
+        # pipeline = f"rtmp2src blocksize=1 num-buffers=1 host=0.0.0.0 port={port} application=\"/live\" ! decodebin ! autoconvert ! appsink"
         tello.cap = cv2.VideoCapture(address)
-
+        tello.cap.set( cv2.CAP_PROP_BUFFERSIZE, 1 )
         self.cap = tello.cap
+        self.lock = Lock()
 
         if not self.cap.isOpened():
             self.cap.open(address)
@@ -1062,12 +1075,15 @@ class BackgroundFrameRead:
         start = time.time()
         while time.time() - start < Tello.FRAME_GRAB_TIMEOUT:
             Tello.LOGGER.debug('trying to grab a frame...')
-            self.grabbed, self.frame = self.cap.read()
-            if self.frame is not None:
+            # self.grabbed, self.frame = self.cap.read()
+            self.grabbed = self.cap.grab()
+            if self.grabbed:
                 break
-            time.sleep(0.05)
+            # if self.frame is not None:
+            #    break
+            # time.sleep(0.05)
 
-        if not self.grabbed or self.frame is None:
+        if not self.grabbed:
             raise Exception('Failed to grab first frame from video stream')
 
         self.stopped = False
@@ -1084,11 +1100,24 @@ class BackgroundFrameRead:
         Internal method, you normally wouldn't call this yourself.
         """
         while not self.stopped:
+            with self.lock:
+                self.grabbed = self.cap.grab()
             if not self.grabbed or not self.cap.isOpened():
                 self.stop()
-            else:
-                self.grabbed, self.frame = self.cap.read()
 
+        #while not self.stopped:
+        #    if not self.grabbed or not self.cap.isOpened():
+        #        self.stop()
+        #    else:
+        #        self.grabbed, self.frame = self.cap.read()
+
+    def get_frame(self):
+        # return self.frame
+        with self.lock:
+            _, self.last_frame = self.cap.retrieve()
+        return self.last_frame
+        
+        
     def stop(self):
         """Stop the frame update worker
         Internal method, you normally wouldn't call this yourself.

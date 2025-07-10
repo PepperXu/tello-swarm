@@ -13,11 +13,11 @@ frame_read = tello.get_frame_read()
 def videoRecorder():
     # create a VideoWrite object, recoring to ./video.avi
     # 创建一个VideoWrite对象，存储画面至./video.avi
-    height, width, _ = frame_read.frame.shape
+    height, width, _ = frame_read.get_frame().shape
     video = cv2.VideoWriter('video.avi', cv2.VideoWriter_fourcc(*'XVID'), 30, (width, height))
 
     while keepRecording:
-        video.write(frame_read.frame)
+        video.write(frame_read.get_frame())
         time.sleep(1 / 30)
 
     video.release()

@@ -14,12 +14,12 @@ def panorama_full_clockwise(tello_name):
     tello.streamon()
 
     for i in range(4):
-        img = tello.get_frame_read().frame
+        img = tello.get_frame_read().get_frame()
         cv2.imwrite(f'Panorama-full-clockwise_{time.time()}.jpg', img)
         time.sleep(1)
         tello.rotate_clockwise(80)
 
-    img = tello.get_frame_read().frame
+    img = tello.get_frame_read().get_frame()
     cv2.imwrite(f'Panorama-full-clockwise_{time.time()}.jpg', img)
     time.sleep(1)
     tello.rotate_clockwise(40)
@@ -35,12 +35,12 @@ def panorama_half_clockwise(tello_name):
     tello.rotate_counter_clockwise(90)
 
     for i in range(3):
-        img = tello.get_frame_read().frame
+        img = tello.get_frame_read().get_frame()
         cv2.imwrite(f'Panorama-half-clockwise_{time.time()}.jpg', img)
         time.sleep(1)
         tello.rotate_clockwise(60)
 
-    img = tello.get_frame_read().frame
+    img = tello.get_frame_read().get_frame()
     cv2.imwrite(f'Panorama-half-clockwise_{time.time()}.jpg', img)
     time.sleep(1)
     tello.rotate_counter_clockwise(90)
@@ -54,12 +54,12 @@ def panorama_full_counter_clockwise(tello_name):
     tello.streamon()
 
     for i in range(4):
-        img = tello.get_frame_read().frame
+        img = tello.get_frame_read().get_frame()
         cv2.imwrite(f'Panorama-full-counter-clockwise_{time.time()}.jpg', img)
         time.sleep(1)
         tello.rotate_counter_clockwise(80)
 
-    img = tello.get_frame_read().frame
+    img = tello.get_frame_read().get_frame()
     cv2.imwrite(f'/Panorama-full-counter-clockwise_{time.time()}.jpg', img)
     time.sleep(1)
     tello.rotate_counter_clockwise(40)
@@ -75,12 +75,12 @@ def panorama_half_counter_clockwise(tello_name):
     tello.rotate_clockwise(90)
 
     for i in range(3):
-        img = tello.get_frame_read().frame
+        img = tello.get_frame_read().get_frame()
         cv2.imwrite(f'Panorama-half-counter-clockwise_{time.time()}.jpg', img)
         time.sleep(1)
         tello.rotate_counter_clockwise(60)
 
-    img = tello.get_frame_read().frame
+    img = tello.get_frame_read().get_frame()
     cv2.imwrite(f'Panorama_half_counter_clockwise-{time.time()}.jpg', img)
     time.sleep(1)
     tello.rotate_clockwise(90)

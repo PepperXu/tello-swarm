@@ -96,7 +96,7 @@ class FrontEnd(object):
 
             self.screen.fill([0, 0, 0])
 
-            frame = frame_read.frame
+            frame = frame_read.get_frame()
             # battery n. 电池
             text = "Battery: {}%".format(self.tello.get_battery())
             cv2.putText(frame, text, (5, 720 - 5),
