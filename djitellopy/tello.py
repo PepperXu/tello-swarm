@@ -551,7 +551,7 @@ class Tello:
         success = self.send_control_command("command")
         while not success:
             time.sleep(3)
-            self.send_control_command("command")
+            success = self.send_control_command("command")
 
         if wait_for_state:
             REPS = 20

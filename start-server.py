@@ -26,17 +26,19 @@ def receive_messages():
         print(f"[RECV] From {addr}: {message}")
         global client_address
         client_address = addr
-            
+        if message == "connect":
+            print(f"Client connected!")
         if len(communication.connected_tellos) > 0:
             comp = message.split(" ")
-            cur_ip = comp[0]
-            cur_command = comp[1]
-            process_command(cur_ip, cur_command)
+            if len(comp) == 2:
+                cur_ip = comp[0]
+                cur_command = comp[1]
+                process_command(cur_ip, cur_command)
             
 
 def send_server_messages():
     while True:
-        if len(communication.message_queue) > 0:
+        if len(communication.message_queue) > 0 and client_address:
             message = communication.message_queue.pop()
             server_socket.sendto(message.encode('utf-8'), client_address)
             print(f"[SEND] To {HOST}: {message}")
@@ -46,7 +48,7 @@ def update_status_messages():
     while True:
         if len(communication.connected_tellos) > 0 and client_address:
             for tello in communication.connected_tellos:
-                a = {"ip":tello.address[0], "isFlying":tello.is_Flying, "battery":tello.get_battery(), "height":tello.get_height()}
+                a = {"ip":tello.address[0], "isFlying":tello.is_flying, "battery":tello.get_battery(), "height":tello.get_height()}
                 message = "Status|" + json.dumps(a)
                 communication.message_queue.append(message)
         time.sleep(2)
