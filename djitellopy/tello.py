@@ -93,6 +93,11 @@ class Tello:
     stream_on = False
     is_flying = False
 
+    left_right_velocity = 0
+    forward_backward_velocity = 0
+    up_down_velocity = 0 
+    yaw_velocity = 0
+
     def __init__(self,
                  host=TELLO_IP,
                  retry_count=RETRY_COUNT):
@@ -565,6 +570,7 @@ class Tello:
                     self.VS_UDP_PORT = 2000 + int(self.address[0][-2:])
                     self.set_video_port(self.VS_UDP_PORT)
                     process = Popen(f"ffplay udp://0.0.0.0:{self.VS_UDP_PORT}", creationflags=CREATE_NEW_CONSOLE)
+                    self.set_speed(50)
                     break
                 time.sleep(1 / REPS)
 
@@ -600,6 +606,9 @@ class Tello:
         # Something it takes a looooot of time to take off and return a succesful takeoff.
         # So we better wait. Otherwise, it would give us an error on the following calls.
         self.send_control_command("takeoff", timeout=Tello.TAKEOFF_TIMEOUT)
+        self.update_rc_control_worker = Thread(target=self.update_rc_control, daemon=True)
+        self.rc_control_updating = True
+        self.update_rc_control_worker.start()
         self.is_flying = True
 
     def set_video_port(self, port):
@@ -609,6 +618,8 @@ class Tello:
         """Automatic landing.
         """
         self.send_control_command("land")
+        self.rc_control_updating = False
+        self.update_rc_control_worker.join()
         self.is_flying = False
 
     def streamon(self):
@@ -836,6 +847,23 @@ class Tello:
             x: 10-100
         """
         self.send_control_command("speed {}".format(x))
+
+    def update_rc_control(self):
+        def clamp100(x: int) -> int:
+            return max(-100, min(100, x))
+        while self.rc_control_updating:
+            cmd = 'rc {} {} {} {}'.format(
+                clamp100(self.left_right_velocity),
+                clamp100(self.forward_backward_velocity),
+                clamp100(self.up_down_velocity),
+                clamp100(self.yaw_velocity)
+            )
+            self.left_right_velocity = 0
+            self.forward_backward_velocity = 0
+            self.up_down_velocity = 0
+            self.yaw_velocity = 0
+            self.send_command_without_return(cmd)
+            time.sleep(self.TIME_BTW_RC_CONTROL_COMMANDS)
 
     def send_rc_control(self, left_right_velocity: int, forward_backward_velocity: int, up_down_velocity: int,
                         yaw_velocity: int):
