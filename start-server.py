@@ -4,6 +4,7 @@ from djitellopy import TelloSwarm, communication, Tello
 import time
 import json
 import socket
+import keyboard
 
 HOST = '127.0.0.1'
 PORT = 9999
@@ -12,7 +13,7 @@ server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 client_address = None
 
 starting_swarm = TelloSwarm.fromIps([
-    "192.168.1.65",
+    "192.168.1.64",
     "192.168.1.62",
 ])
 
@@ -31,16 +32,17 @@ def receive_messages():
             print(f"Client connected!")
         if len(communication.connected_tellos) > 0:
             comp = message.split("|")
-            if len(comp) == 2:
-                cur_ip = comp[0]
-                cur_command = comp[1]
-                process_command(cur_ip, cur_command)
-            if len(comp) == 3:
-                cur_ip = comp[0]
-                cur_vel_message = comp[2]
-                split_vel = cur_vel_message.split(",")
-                cur_vel = (float(split_vel[0]), float(split_vel[1]), float(split_vel[2]), float(split_vel[3])) 
-                process_velocity_control(cur_ip, cur_vel)
+            if len(comp) > 1:
+                match comp[0]:
+                    case "drone_command":
+                        pass 
+                    case "drone_velocity_command":
+                        pass 
+                    case "swarm_command":
+                        process_swarm_command(comp[1:])
+                    case "swarm_velocity_command":
+                        # not used: velocity command processed locally in Unity
+                        process_swarm_velocity_command(comp[1:])
             
 
 def send_server_messages():
@@ -61,28 +63,33 @@ def update_status_messages():
         time.sleep(2)
                         
 
-def process_command(ip : str, command:str):
-    starting_swarm.parallel(lambda i, tello: parallel_command(i, tello, ip, command))
+def process_swarm_command(commands: list):
+    starting_swarm.parallel(lambda i, tello: parallel_command(i, tello, commands))
 
-def parallel_command(i: int, tello: Tello, ip: str, cur_command: str): 
-    if tello.address[0] == ip:
-        match cur_command:
-            case "takeoff":
-                tello.takeoff()
-            case "land":
-                tello.land()
+def parallel_command(i: int, tello: Tello, commands: list):
+    for command in commands:
+        loaded_command = json.loads(command)
+        if loaded_command["ip"] == tello.address[0]:
+            match loaded_command["command"]:
+                case "takeoff":
+                    tello.takeoff()
+                case "land":
+                    tello.land()
 
-def process_velocity_control(ip: str, velocity: tuple[float, float, float, float]):
-    starting_swarm.parallel(lambda i, tello: parallel_velocity_control(i, tello, ip, velocity))
+# not used: velocity command processed locally in Unity
+def process_swarm_velocity_command(commands: list):
+    starting_swarm.parallel(lambda i, tello: parallel_velocity_control(i, tello, commands))
             
-            
-def parallel_velocity_control(i: int, tello: Tello, ip: str, cur_velo: tuple[float, float, float, float]):
-    if tello.address[0] == ip and tello.is_flying:
-        tello.yaw_velocity = int(cur_velo[0] * speed_multiplier)
-        tello.up_down_velocity = int(cur_velo[1] * speed_multiplier)
-        tello.left_right_velocity = int(cur_velo[2] * speed_multiplier)
-        tello.forward_backward_velocity = int(cur_velo[3] * speed_multiplier)
-        # tello.send_rc_control(left_right_velocity, for_back_velocity, up_down_velocity, yaw_velocity)
+# not used: velocity command processed locally in Unity          
+def parallel_velocity_control(i: int, tello: Tello, commands: list):
+    for command in commands:
+        loaded_command = json.loads(command)
+        if loaded_command["ip"] == tello.address[0]:
+            tello.yaw_velocity = int(float(loaded_command["input"]["x"]) * speed_multiplier)
+            tello.up_down_velocity = int(float(loaded_command["input"]["y"]) * speed_multiplier)
+            tello.left_right_velocity = int(float(loaded_command["input"]["z"])  * speed_multiplier)
+            tello.forward_backward_velocity = int(float(loaded_command["input"]["w"])  * speed_multiplier)
+            tello.rc_control_updating = True
 
 
 def initialize_server():
@@ -106,4 +113,7 @@ update_status_thread.start()
 # Keep the main thread alive
 
 while True:
+    if keyboard.is_pressed('p'):
+        print('emergency landing!')
+        starting_swarm.land()
     pass

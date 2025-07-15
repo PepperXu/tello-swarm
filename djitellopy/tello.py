@@ -5,13 +5,14 @@
 import logging
 import socket
 import time
-from threading import Thread, Lock
+from threading import Thread, Lock, Event
 from typing import Optional, Union, Type, Dict
 from djitellopy import communication
 import json
 import cv2 # type: ignore
 from .enforce_types import enforce_types
 from subprocess import Popen, CREATE_NEW_CONSOLE
+import signal
 
 
 threads_initialized = False
@@ -31,7 +32,7 @@ class Tello:
     TAKEOFF_TIMEOUT = 20  # in seconds
     FRAME_GRAB_TIMEOUT = 3
     TIME_BTW_COMMANDS = 0.1  # in seconds
-    TIME_BTW_RC_CONTROL_COMMANDS = 0.001  # in seconds
+    TIME_BTW_RC_CONTROL_COMMANDS = 0.0  # in seconds
     RETRY_COUNT = 1  # number of retries after a failed command
     TELLO_IP = '192.168.10.1'  # Tello IP address
 
@@ -93,10 +94,16 @@ class Tello:
     stream_on = False
     is_flying = False
 
+    # not used
     left_right_velocity = 0
     forward_backward_velocity = 0
     up_down_velocity = 0 
     yaw_velocity = 0
+
+    #not used
+    rc_control_updating = False
+    rc_control_previously_updating = False
+
 
     def __init__(self,
                  host=TELLO_IP,
@@ -129,6 +136,7 @@ class Tello:
         drones[host] = {'responses': [], 'state': {}}
 
         self.LOGGER.info("Tello instance was initialized. Host: '{}'. Port: '{}'.".format(host, Tello.CONTROL_UDP_PORT))
+
 
     def get_own_udp_object(self):
         """Get own object from the global drones dict. This object is filled
@@ -554,9 +562,14 @@ class Tello:
         """Enter SDK mode. Call this before any of the control functions.
         """
         success = self.send_control_command("command")
-        while not success:
-            time.sleep(3)
+        interrupted = False
+        while not success and not interrupted:
+            try:
+                time.sleep(3)
+            except KeyboardInterrupt:
+                interrupted = True
             success = self.send_control_command("command")
+
 
         if wait_for_state:
             REPS = 20
@@ -606,9 +619,9 @@ class Tello:
         # Something it takes a looooot of time to take off and return a succesful takeoff.
         # So we better wait. Otherwise, it would give us an error on the following calls.
         self.send_control_command("takeoff", timeout=Tello.TAKEOFF_TIMEOUT)
-        self.update_rc_control_worker = Thread(target=self.update_rc_control, daemon=True)
-        self.rc_control_updating = True
-        self.update_rc_control_worker.start()
+        # self.update_rc_control_worker = Thread(target=self.update_rc_control, daemon=True)
+        # self.enable_rc_control = True
+        # self.update_rc_control_worker.start()
         self.is_flying = True
 
     def set_video_port(self, port):
@@ -618,8 +631,8 @@ class Tello:
         """Automatic landing.
         """
         self.send_control_command("land")
-        self.rc_control_updating = False
-        self.update_rc_control_worker.join()
+        # self.enable_rc_control = False
+        # self.update_rc_control_worker.join()
         self.is_flying = False
 
     def streamon(self):
@@ -848,22 +861,29 @@ class Tello:
         """
         self.send_control_command("speed {}".format(x))
 
+    # not used: intended for network sync but velocity command processed locally in Unity
     def update_rc_control(self):
         def clamp100(x: int) -> int:
             return max(-100, min(100, x))
-        while self.rc_control_updating:
-            cmd = 'rc {} {} {} {}'.format(
-                clamp100(self.left_right_velocity),
-                clamp100(self.forward_backward_velocity),
-                clamp100(self.up_down_velocity),
-                clamp100(self.yaw_velocity)
-            )
-            self.left_right_velocity = 0
-            self.forward_backward_velocity = 0
-            self.up_down_velocity = 0
-            self.yaw_velocity = 0
-            self.send_command_without_return(cmd)
-            time.sleep(self.TIME_BTW_RC_CONTROL_COMMANDS)
+        while self.enable_rc_control:
+            if self.rc_control_updating:
+                self.rc_control_previously_updating = True
+                cmd = 'rc {} {} {} {}'.format(
+                    clamp100(self.left_right_velocity),
+                    clamp100(self.forward_backward_velocity),
+                    clamp100(self.up_down_velocity),
+                    clamp100(self.yaw_velocity)
+                )
+                self.send_command_without_return(cmd)
+                self.rc_control_updating = False
+                time.sleep(self.TIME_BTW_RC_CONTROL_COMMANDS)
+                continue
+            else:
+                if self.rc_control_previously_updating:
+                    cmd = 'rc 0 0 0 0'
+                    self.send_command_without_return(cmd)
+                    self.rc_control_previously_updating = False
+                time.sleep(self.TIME_BTW_RC_CONTROL_COMMANDS)
 
     def send_rc_control(self, left_right_velocity: int, forward_backward_velocity: int, up_down_velocity: int,
                         yaw_velocity: int):
